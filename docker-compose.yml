@@ -1,0 +1,43 @@
+version: "2.4"
+services:
+  redis:
+    image: redis:alpine
+    hostname: redis
+    ports:
+      - "6379:6379"
+    networks:
+      - mox-server-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      timeout: 3s
+      retries: 10
+  server:
+    image: mox-server
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "9898:9898"
+    networks:
+      - mox-server-network
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "server:9898/healthcheck"]
+      interval: 1s
+      timeout: 10s
+      retries: 10
+  initializer:
+    image: curlimages/curl
+    depends_on:
+      server:
+        condition: service_healthy
+    volumes:
+      - .:/data
+    command: ["sh","-c","sleep 8 && echo calling service && curl -X POST server:9898/endpoints -H 'Content-Type: application/json' --data-binary '@data/endpoints-schema-example.json' "]    
+    networks:
+      - mox-server-network
+networks:
+  mox-server-network:
