@@ -11,6 +11,8 @@ module Models
     attribute :verb, Types::String
     attribute :path, Types::String
     attribute :return_value, Types::Any
+    attribute :min_response_millis?, Types::Integer
+    attribute :max_response_millis?, Types::Integer
 
     def return_value_json(binding)
       template = ERB.new(return_value)
