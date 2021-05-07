@@ -124,3 +124,26 @@ However, calling `GET /test-control-flow?age=17` should give back
   "greeting": "Hello!"
 }
 ```
+
+## Controlling Response Times
+It is possible to set a fixed delay time before an `endpoint` returns its `return_value` by supplying the optional `min_response_millis`:
+```json
+{
+  "verb": "GET",
+  "path": "/my_delayed_path",
+  "return_value": "{\"a\": 4}",
+  "min_response_millis": 150
+}
+```
+The value should be expressed in **milliseconds**.
+
+It is also possible to set a range for randomizing the delay time by supplying `max_response_millis` in addition to `min_response_millis`:
+```json
+{
+  "verb": "GET",
+  "path": "/my_delayed_path_2",
+  "return_value": "{\"a\": 4}",
+  "min_response_millis": 150,
+  "max_response_millis": 500,
+}
+```

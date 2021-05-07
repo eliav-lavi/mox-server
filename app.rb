@@ -13,11 +13,11 @@ class App < Sinatra::Base
 
   set :protection, false
 
+  logger = Logger.new(STDOUT)
+
   configure :production, :development do
     enable :logging, :dump_errors, :raise_errors, :show_exceptions
   end
-
-  logger = Logger.new(STDOUT)
 
   redis_client = Services::WrappedRedisClient.build(host: ENV["REDIS_HOST"], port: ENV["REDIS_PORT"])
   CURRENT_ID_KEY = 'MOX_current_id'
@@ -165,6 +165,7 @@ class App < Sinatra::Base
     self.class.send(method, endpoint.path) do
       content_type :json
       body = JSON.parse(request.body.read) rescue nil
+      sleep(calculate_sleep_time(endpoint: endpoint))
       endpoint_return_value(endpoint: endpoint, params: params, body: body, redis_client: redis_client)
     end
   end
@@ -173,6 +174,21 @@ class App < Sinatra::Base
     endpoint_id = Services::EndpointIdComposer.call(id: endpoint.id)
     persisted_endpoint = Models::Endpoint.new(JSON.parse(redis_client.get(key: endpoint_id)))
     persisted_endpoint.return_value_json(binding)
+  end
+
+  private def calculate_sleep_time(endpoint:)
+    if endpoint.min_response_millis.nil? && endpoint.max_response_millis.nil?
+      0
+    elsif endpoint.max_response_millis.nil?
+      endpoint.min_response_millis.to_f / 1000
+    elsif endpoint.min_response_millis.nil?
+      endpoint.max_response_millis.to_f / 1000
+    elsif endpoint.min_response_millis > endpoint.max_response_millis
+      logger.warn("response time range is invalid for endpoint: #{endpoint.attributes}")
+      0
+    else
+      rand((endpoint.min_response_millis.to_f / 1000)..(endpoint.max_response_millis.to_f / 1000))
+    end
   end
 
   private def remove_endpoint(endpoint:)
