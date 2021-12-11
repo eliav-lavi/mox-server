@@ -2,8 +2,16 @@
 
 **mox** is an easy-to-use mock server aimed at facilitating local development & testing scenarios. To support this, mox allows to dynamically create & manipulate endpoints on its server. The created mock endpoints are available at the same port mox is running at.
 
+## Use Cases
+
+Classic use-cases for using mox is when writing component tests for a microservice, which may be implemented in any language. Instead of bringing up collaboratoring HTTP services, which might be complicate and resource-heavy, mox can help by serving mocked responses instead. Any endpoint defined in mox is fully customizable and updatable, so you can test different scenarios easily.
+
+It is also useful for local development - mox allows spinning up a microservice on its own, without doing the same with its collaborating HTTP services. Along with [mox-ui](https://github.com/eliav-lavi/mox-ui), it is easy to manually adjust the responses of collaborators in order to experience & manually test the difference in the application's behavior.
+
+Needless to say, **mox is not intended to be used in production** or any world-facing environment for obvious security reasons.
+
 ## Setup
-If you're using Docker, the simplest way to get started is with `docker-compose up -d`. This will bring up the server itself at port `9898`. 
+If you're using Docker, the simplest way to get started is with `docker-compose up -d`. This will bring up the server itself at port `9898`.
 
 ## Usage
 NOTE: [mox-ui](https://github.com/eliav-lavi/mox-ui) is recommended for easy manual management of mox. Should you need to call the server API directly (e.g. in a testing scenario), you may use the following abilities.
@@ -56,6 +64,8 @@ To create multiple endpoints in a single call, use `POST /endpoints` with an arr
 ```
 
 To delete all existing endpoints, call `DELETE endpoints`
+
+**NOTE**: in case an undefined endpoint will be called, a special, reserved `492` status code will be returned by mox to indicate this. This is done to allow users to define endpoints which return `404` status codes explicitly.
 
 ## Templating & Dynamic Responses
 Sometimes more sophisticated mocks are required - one might need to build the mocked response dynamically, based on the parameters or request body sent to the endpoint. To support that, mox allows the `return_value` to be written as a Ruby [ERB](https://docs.ruby-lang.org/en/2.6.0/ERB.html) template. The variables `params` & `body` are exposed by mox to allow access to the query params and the request body, respectively.
@@ -125,7 +135,43 @@ However, calling `GET /test-control-flow?age=17` should give back
 }
 ```
 
-## Controlling Response Times
+**NOTE**: In case ERB fails to evaluate `return_value` due to `SyntaxError`, a special, reserved `592` status code will be returned by mox to indicate this. This is done to allow users to define endpoints which return `500` status codes explicitly.
+It is your responsibility to make sure the ERB code you supply in a `return_value` is valid; mox cannot validate this upon endpoint creation.
+
+
+## Further Controls
+### Status Code
+Supply the optional `status_code` field to set a custom status code for an `endpoint`:
+```json
+{
+  "verb": "GET",
+  "path": "/my_missing_resource",
+  "return_value": "{}",
+  "status_code": 404
+}
+```
+
+**NOTE**: Any status code is accepted as input, except for two which are reserved by mox:
+* `492` - will be returned when an (yet) undefined endpoint gets called
+* `592` - will be returned when a [`SyntaxError`](https://ruby-doc.org/core-2.6.3/SyntaxError.html) has occured. This might happen when a dynamic response cannot be evaluated due to malformed code.
+
+These two status code were picked as they are not [recognized HTTP status codes](https://developer.mozilla.org/en-US/docs/Web/HTTP/Status), hence the chances of conflicting with your application code flows are minuscule.
+
+
+
+### Headers
+It is possible to control the headers on the response of an `endpoint` by passing an object under the `headers` field:
+```json
+{
+  "verb": "GET",
+  "path": "/my_path_with_my_headers",
+  "return_value": "{\"a\": 4}",
+  "headers": {"Authorization": "foobar", "My-Custom": "stuff11"}
+}
+```
+Headers can be anything you want, weather common recognized ones or custom ones.
+
+### Response Times
 It is possible to set a fixed delay time before an `endpoint` returns its `return_value` by supplying the optional `min_response_millis`:
 ```json
 {
@@ -144,6 +190,6 @@ It is also possible to set a range for randomizing the delay time by supplying `
   "path": "/my_delayed_path_2",
   "return_value": "{\"a\": 4}",
   "min_response_millis": 150,
-  "max_response_millis": 500,
+  "max_response_millis": 500
 }
 ```

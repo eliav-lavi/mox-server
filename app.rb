@@ -16,7 +16,8 @@ class App < Sinatra::Base
   logger = Logger.new(STDOUT)
 
   configure :production, :development do
-    enable :logging, :dump_errors, :raise_errors, :show_exceptions
+    enable :logging, :dump_errors, :raise_errors
+    set :show_exceptions, :after_handler
   end
 
   redis_client = Services::WrappedRedisClient.build(host: ENV["REDIS_HOST"], port: ENV["REDIS_PORT"])
@@ -160,14 +161,29 @@ class App < Sinatra::Base
   end
   
   METHODS = {'GET' => :get, 'POST' => :post, 'PUT' => :put, 'PATCH' => :patch, 'DELETE' => :delete}
+  RESERVED_STATUS_CODES = [492, 592]
   private def add_endpoint(endpoint:, redis_client:)
+    if RESERVED_STATUS_CODES.include?(endpoint.status_code)
+      raise "status code #{endpoint.status_code} is reserved for Mox and cannot be used for user-defined endpoints"
+    end
     method = METHODS[endpoint.verb]
     self.class.send(method, endpoint.path) do
       content_type :json
       body = JSON.parse(request.body.read) rescue nil
       sleep(calculate_sleep_time(endpoint: endpoint))
-      endpoint_return_value(endpoint: endpoint, params: params, body: body, redis_client: redis_client)
+
+      status endpoint.status_code
+      endpoint.headers.each { |k, v| headers[k] = v }
+      body endpoint_return_value(endpoint: endpoint, params: params, body: body, redis_client: redis_client)
+    rescue SyntaxError => e
+      status 592
+      { respone: "MOX ERROR: endpoint response could not be returned due to bad syntax: #{e.message}" }.to_json
     end
+  end
+
+  not_found do
+    status 492
+    { respone: "MOX ERROR: endpoint doesn't exist" }.to_json
   end
 
   private def endpoint_return_value(endpoint:, params:, body:, redis_client:)
