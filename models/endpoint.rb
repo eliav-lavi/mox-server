@@ -1,7 +1,9 @@
 require_relative '../types'
+# require_relative './header'
 require 'dry-struct'
 require 'json'
 require 'erb'
+
 
 module Models
   class Endpoint < Dry::Struct
@@ -13,6 +15,8 @@ module Models
     attribute :return_value, Types::Any
     attribute :min_response_millis?, Types::Integer
     attribute :max_response_millis?, Types::Integer
+    attribute :status_code, Types::Integer.default(200)
+    attribute :headers, Types::Hash.map(Types::String, Types::String).default({})
 
     def return_value_json(binding)
       template = ERB.new(return_value)

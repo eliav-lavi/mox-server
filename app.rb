@@ -166,7 +166,10 @@ class App < Sinatra::Base
       content_type :json
       body = JSON.parse(request.body.read) rescue nil
       sleep(calculate_sleep_time(endpoint: endpoint))
-      endpoint_return_value(endpoint: endpoint, params: params, body: body, redis_client: redis_client)
+      
+      status endpoint.status_code
+      endpoint.headers.each { |k, v| headers[k] = v }
+      body endpoint_return_value(endpoint: endpoint, params: params, body: body, redis_client: redis_client)
     end
   end
 
