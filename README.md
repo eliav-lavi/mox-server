@@ -125,7 +125,31 @@ However, calling `GET /test-control-flow?age=17` should give back
 }
 ```
 
-## Controlling Response Times
+
+## Further Controls
+### Status Code
+Supply the optional `status_code` field to set a custom status code for an `endpoint`:
+```json
+{
+  "verb": "GET",
+  "path": "/my_missing_resource",
+  "return_value": "{}",
+  "status_code": 404
+}
+```
+### Headers
+It is possible to control the headers on the response of an `endpoint` by passing an object under the `headers` field:
+```json
+{
+  "verb": "GET",
+  "path": "/my_path_with_my_headers",
+  "return_value": "{\"a\": 4}",
+  "headers": {"Authorization": "foobar", "My-Custom": "stuff11"}
+}
+```
+Headers can be anything you want, weather common recognized ones or custom ones.
+
+### Response Times
 It is possible to set a fixed delay time before an `endpoint` returns its `return_value` by supplying the optional `min_response_millis`:
 ```json
 {
@@ -144,6 +168,6 @@ It is also possible to set a range for randomizing the delay time by supplying `
   "path": "/my_delayed_path_2",
   "return_value": "{\"a\": 4}",
   "min_response_millis": 150,
-  "max_response_millis": 500,
+  "max_response_millis": 500
 }
 ```
