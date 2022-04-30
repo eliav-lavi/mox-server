@@ -1,5 +1,4 @@
 require_relative '../types'
-# require_relative './header'
 require 'dry-struct'
 require 'json'
 require 'erb'

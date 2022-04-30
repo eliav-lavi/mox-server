@@ -6,25 +6,20 @@ require 'dry-struct'
 
 require_relative 'types'
 require_relative 'models/endpoint'
-require_relative 'services/wrapped_redis_client'
+require_relative 'services/storage/internal_storage_client'
 require_relative 'services/endpoint_id_composer'
 
 class App < Sinatra::Base
+  logger = Logger.new(STDOUT)
+  logger.info("starting mox-server")
 
   set :protection, false
-
-  logger = Logger.new(STDOUT)
 
   configure :production, :development do
     enable :logging, :dump_errors, :raise_errors
     set :show_exceptions, :after_handler
   end
 
-  redis_client = Services::WrappedRedisClient.build(host: ENV["REDIS_HOST"], port: ENV["REDIS_PORT"])
-  CURRENT_ID_KEY = 'MOX_current_id'
-  current_id = redis_client.get(key: CURRENT_ID_KEY) || 0
-  redis_client.set(key: CURRENT_ID_KEY, value: current_id)
-  
   before do
     content_type :json
 
@@ -39,13 +34,18 @@ class App < Sinatra::Base
     response.headers['Access-Control-Allow-Headers'] = 'X-Requested-With, X-HTTP-Method-Override, Content-Type, Cache-Control, Accept'
   end
 
+  storage_client = Services::Storage::InternalStorageClient.new
+  CURRENT_ID_KEY = 'MOX_current_id'
+  current_id = storage_client.get(key: CURRENT_ID_KEY) || 0
+  storage_client.set(key: CURRENT_ID_KEY, value: current_id)
+
   get '/healthcheck' do
     content_type :json
     { status: 'OK' }.to_json
   end
 
   get '/endpoint' do
-    { response: get_all_endpoints(redis_client: redis_client).map(&:attributes) }.to_json
+    { response: get_all_endpoints(storage_client: storage_client).map(&:attributes) }.to_json
   rescue StandardError => e
     status 400
     { respone: "could not handle request to get all endpoints: #{e.message}" }.to_json
@@ -54,12 +54,12 @@ class App < Sinatra::Base
   post '/endpoint' do
     content_type :json
 
-    next_id = redis_client.incr(key: CURRENT_ID_KEY)
+    next_id = storage_client.incr(key: CURRENT_ID_KEY)
     endpoint = Models::Endpoint.build(JSON.parse(request.body.read), id: next_id)
 
-    redis_client.set(key: Services::EndpointIdComposer.call(id: endpoint.id), value: endpoint.attributes.to_json)
+    storage_client.set(key: Services::EndpointIdComposer.call(id: endpoint.id), value: endpoint.attributes.to_json)
     
-    add_endpoint(endpoint: endpoint, redis_client: redis_client)
+    add_endpoint(endpoint: endpoint, storage_client: storage_client)
     
     logger.info("created new endpoint: #{endpoint.verb} #{endpoint.path}")
 
@@ -75,12 +75,12 @@ class App < Sinatra::Base
     raw_endpoints = JSON.parse(request.body.read)
     
     endpoints = raw_endpoints.map do |raw_endpoint|
-      next_id = redis_client.incr(key: CURRENT_ID_KEY)
+      next_id = storage_client.incr(key: CURRENT_ID_KEY)
       endpoint = Models::Endpoint.build(raw_endpoint, id: next_id)
 
-      redis_client.set(key: Services::EndpointIdComposer.call(id: endpoint.id), value: endpoint.attributes.to_json)
+      storage_client.set(key: Services::EndpointIdComposer.call(id: endpoint.id), value: endpoint.attributes.to_json)
       
-      add_endpoint(endpoint: endpoint, redis_client: redis_client)
+      add_endpoint(endpoint: endpoint, storage_client: storage_client)
       
       logger.info("created new endpoint: #{endpoint.verb} #{endpoint.path}")
 
@@ -98,11 +98,11 @@ class App < Sinatra::Base
 
     endpoint = Models::Endpoint.build(JSON.parse(request.body.read))
 
-    redis_client.delete(key: Services::EndpointIdComposer.call(id: endpoint.id))
+    storage_client.delete(key: Services::EndpointIdComposer.call(id: endpoint.id))
     remove_endpoint(endpoint: endpoint)
 
-    redis_client.set(key: Services::EndpointIdComposer.call(id: endpoint.id), value: endpoint.attributes.to_json)
-    add_endpoint(endpoint: endpoint, redis_client: redis_client)
+    storage_client.set(key: Services::EndpointIdComposer.call(id: endpoint.id), value: endpoint.attributes.to_json)
+    add_endpoint(endpoint: endpoint, storage_client: storage_client)
 
     logger.info("updated endpoint: #{endpoint.verb} #{endpoint.path}")
 
@@ -117,14 +117,14 @@ class App < Sinatra::Base
 
     endpoint_id = Services::EndpointIdComposer.call(id: params['id'])
 
-    persisted_endpoint = redis_client.get(key: endpoint_id)
+    persisted_endpoint = storage_client.get(key: endpoint_id)
     raise "endpoint ##{endpoint_id} not found" if persisted_endpoint.nil?
     
     endpoint = Models::Endpoint.new(JSON.parse(persisted_endpoint))
 
     logger.info("found endpoint to remove: #{endpoint}")
 
-    redis_client.delete(key: endpoint_id)
+    storage_client.delete(key: endpoint_id)
 
     remove_endpoint(endpoint: endpoint)
 
@@ -138,10 +138,10 @@ class App < Sinatra::Base
 
   delete '/endpoints' do
     content_type :json
-    all_endpoints = get_all_endpoints(redis_client: redis_client)
+    all_endpoints = get_all_endpoints(storage_client: storage_client)
     all_endpoints.map do |endpoint|
       endpoint_id = Services::EndpointIdComposer.call(id: endpoint.id)
-      redis_client.delete(key: endpoint_id)
+      storage_client.delete(key: endpoint_id)
       remove_endpoint(endpoint: endpoint)
       logger.info("removed endpoint: #{endpoint.verb} #{endpoint.path}")
     end
@@ -154,15 +154,15 @@ class App < Sinatra::Base
     { respone: "could not handle request to remove endpoint: #{e.message}" }.to_json
   end
 
-  private def get_all_endpoints(redis_client:)
-    redis_client
+  private def get_all_endpoints(storage_client:)
+    storage_client
       .get_all(prefix: Services::EndpointIdComposer::PREFIX)
       .map { |raw_endpoint| Models::Endpoint.new(JSON.parse(raw_endpoint)) }
   end
-  
+
   METHODS = {'GET' => :get, 'POST' => :post, 'PUT' => :put, 'PATCH' => :patch, 'DELETE' => :delete}
   RESERVED_STATUS_CODES = [492, 592]
-  private def add_endpoint(endpoint:, redis_client:)
+  private def add_endpoint(endpoint:, storage_client:)
     if RESERVED_STATUS_CODES.include?(endpoint.status_code)
       raise "status code #{endpoint.status_code} is reserved for Mox and cannot be used for user-defined endpoints"
     end
@@ -174,7 +174,7 @@ class App < Sinatra::Base
 
       status endpoint.status_code
       endpoint.headers.each { |k, v| headers[k] = v }
-      body endpoint_return_value(endpoint: endpoint, params: params, body: body, redis_client: redis_client)
+      body endpoint_return_value(endpoint: endpoint, params: params, body: body, storage_client: storage_client)
     rescue SyntaxError => e
       status 592
       { respone: "MOX ERROR: endpoint response could not be returned due to bad syntax: #{e.message}" }.to_json
@@ -186,9 +186,9 @@ class App < Sinatra::Base
     { respone: "MOX ERROR: endpoint doesn't exist" }.to_json
   end
 
-  private def endpoint_return_value(endpoint:, params:, body:, redis_client:)
+  private def endpoint_return_value(endpoint:, params:, body:, storage_client:)
     endpoint_id = Services::EndpointIdComposer.call(id: endpoint.id)
-    persisted_endpoint = Models::Endpoint.new(JSON.parse(redis_client.get(key: endpoint_id)))
+    persisted_endpoint = Models::Endpoint.new(JSON.parse(storage_client.get(key: endpoint_id)))
     persisted_endpoint.return_value_json(binding)
   end
 
