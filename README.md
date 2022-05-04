@@ -33,7 +33,7 @@ After creation, the declared endpoint will be assigned a unique id by mox, which
 To list all existing endpoints, call `GET` on `/endpoint`.
 
 ### Update an Existing Endpoint
-To update an existing endpoint, call `PUT` on `/endpoint`. The request body should contain the `id` of the endpoint, in addition to the endpoint information:
+To update an existing endpoint, call `PUT` on `/endpoint/:id` (replace `:id` with the relevant endpoint id), in addition to the endpoint information:
 ```json
 {
   "id": 3,
@@ -44,7 +44,7 @@ To update an existing endpoint, call `PUT` on `/endpoint`. The request body shou
 ```
 
 ### Delete an Existing Endpoint
-To delete an existing endpoint, call `DELETE` on `/endpoint` and pass the id of the endpoint to be deleted as a parameter: `DELETE /endpoint?id=3`
+To delete an existing endpoint, call `DELETE` on `/endpoint/:id` (replace `:id` with the relevant endpoint id), e.g.: `DELETE /endpoint/3`
 
 ### Batch Actions
 To create multiple endpoints in a single call, use `POST /endpoints` with an array of endpoints in the request body:
@@ -63,9 +63,14 @@ To create multiple endpoints in a single call, use `POST /endpoints` with an arr
 ]
 ```
 
-To delete all existing endpoints, call `DELETE endpoints`
+To delete all existing endpoints, call `DELETE /endpoints`
 
 **NOTE**: in case an undefined endpoint will be called, a special, reserved `492` status code will be returned by mox to indicate this. This is done to allow users to define endpoints which return `404` status codes explicitly.
+
+### Usage Errors
+In case of failure during a call to any of the routes in this section, mox will respond with regular status codes:
+* `400` - in case the error is due to a client error (e.g. a required field, such as `path` or `return_value` was not supplied)
+* `500` - any other error (e.g. some unforeseen server error).
 
 ## Templating & Dynamic Responses
 Sometimes more sophisticated mocks are required - one might need to build the mocked response dynamically, based on the parameters or request body sent to the endpoint. To support that, mox allows the `return_value` to be written as a Ruby [ERB](https://docs.ruby-lang.org/en/2.6.0/ERB.html) template. The variables `params` & `body` are exposed by mox to allow access to the query params and the request body, respectively.
@@ -135,7 +140,7 @@ However, calling `GET /test-control-flow?age=17` should give back
 }
 ```
 
-**NOTE**: In case ERB fails to evaluate `return_value` due to `SyntaxError`, a special, reserved `592` status code will be returned by mox to indicate this. This is done to allow users to define endpoints which return `500` status codes explicitly.
+**NOTE**: In case ERB fails to evaluate `return_value` due to `SyntaxError` or any `StandardError` (e.g. calling an undefined method), a special, reserved `591` status code will be returned by mox to indicate this. This is done to allow users to define endpoints which return `500` status codes explicitly.
 It is your responsibility to make sure the ERB code you supply in a `return_value` is valid; mox cannot validate this upon endpoint creation.
 
 
@@ -153,7 +158,8 @@ Supply the optional `status_code` field to set a custom status code for an `endp
 
 **NOTE**: Any status code is accepted as input, except for two which are reserved by mox:
 * `492` - will be returned when an (yet) undefined endpoint gets called
-* `592` - will be returned when a [`SyntaxError`](https://ruby-doc.org/core-2.6.3/SyntaxError.html) has occured. This might happen when a dynamic response cannot be evaluated due to malformed code.
+* `491` - will be returned during a call to a defined endpoint when the evaluation of a dynamic template into a concrete response has failed, either by [`SyntaxError`](https://ruby-doc.org/core-2.6.3/SyntaxError.html) or a [`StandardError`](https://ruby-doc.org/core-2.6.3/StandardError.html). 
+* `591`- will be returned during a call to a defined endpoint when the evaluation of a dynamic template into a concrete response has failed by some unexpected error (should you encounter this scenario, please report it to maintainers 🙏).
 
 These two status code were picked as they are not [recognized HTTP status codes](https://developer.mozilla.org/en-US/docs/Web/HTTP/Status), hence the chances of conflicting with your application code flows are minuscule.
 

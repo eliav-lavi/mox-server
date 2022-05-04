@@ -1,8 +1,10 @@
-require_relative '../types'
 require 'dry-struct'
 require 'json'
 require 'erb'
 
+require_relative '../types'
+require_relative 'endpoint_request'
+require_relative 'client_error'
 
 module Models
   class Endpoint < Dry::Struct
@@ -21,11 +23,19 @@ module Models
       template = ERB.new(return_value)
       implemented_template = template.result(binding)
       JSON.parse(implemented_template).to_json
+    rescue SyntaxError => e
+      raise InvalidTemplateError.new(e.message)
+    rescue StandardError => e
+      raise TemplateEvaluationError.new(e.message)
+    end
+
+    def name
+      "#{verb} #{path}"
     end
 
     def self.build(obj, id: nil)
       effective_id = id || obj['id']
-      Endpoint.new(id: effective_id, **obj.transform_keys(&:to_sym))
+      Endpoint.new(id: effective_id, **obj.attributes)
     end
   end
 end

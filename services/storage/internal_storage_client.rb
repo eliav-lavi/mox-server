@@ -1,6 +1,10 @@
+require 'singleton'
+
 module Services
   module Storage
     class InternalStorageClient
+      include ::Singleton
+
       def initialize
         @data = {}
       end

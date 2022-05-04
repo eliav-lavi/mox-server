@@ -6,25 +6,30 @@ require 'dry-struct'
 
 require_relative 'types'
 require_relative 'models/endpoint'
+require_relative 'models/endpoint_request'
+require_relative 'models/client_error'
 require_relative 'services/storage/internal_storage_client'
 require_relative 'services/endpoint_id_composer'
+require_relative 'services/endpoint_service'
 
 class App < Sinatra::Base
   logger = Logger.new(STDOUT)
-  logger.info("starting mox-server")
+  logger.info("Starting mox-server ⚡")
 
   set :protection, false
 
-  configure :production, :development do
-    enable :logging, :dump_errors, :raise_errors
-    set :show_exceptions, :after_handler
+  configure do
+    enable :logging
+    set :raise_errors, true
+    set :dump_errors, true
+    set :show_exceptions, true
   end
 
   before do
     content_type :json
 
     headers \
-      'Access-Control-Allow-Methods' => 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Methods' => 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
       'Access-Control-Allow-Origin' => '*',
       'Access-Control-Allow-Headers' => 'accept, authorization, origin'
   end
@@ -34,10 +39,7 @@ class App < Sinatra::Base
     response.headers['Access-Control-Allow-Headers'] = 'X-Requested-With, X-HTTP-Method-Override, Content-Type, Cache-Control, Accept'
   end
 
-  storage_client = Services::Storage::InternalStorageClient.new
-  CURRENT_ID_KEY = 'MOX_current_id'
-  current_id = storage_client.get(key: CURRENT_ID_KEY) || 0
-  storage_client.set(key: CURRENT_ID_KEY, value: current_id)
+  endpoint_service = Services::EndpointService.build(self)
 
   get '/healthcheck' do
     content_type :json
@@ -45,140 +47,101 @@ class App < Sinatra::Base
   end
 
   get '/endpoint' do
-    { response: get_all_endpoints(storage_client: storage_client).map(&:attributes) }.to_json
+    { response: endpoint_service.get_all_endpoints.map(&:attributes) }.to_json
   rescue StandardError => e
-    status 400
+    status 500
+    log_error(e)
     { respone: "could not handle request to get all endpoints: #{e.message}" }.to_json
   end
 
   post '/endpoint' do
-    content_type :json
+    endpoint_request = validate_request { Models::EndpointRequest.new(JSON.parse(request.body.read)) }
 
-    next_id = storage_client.incr(key: CURRENT_ID_KEY)
-    endpoint = Models::Endpoint.build(JSON.parse(request.body.read), id: next_id)
-
-    storage_client.set(key: Services::EndpointIdComposer.call(id: endpoint.id), value: endpoint.attributes.to_json)
-    
-    add_endpoint(endpoint: endpoint, storage_client: storage_client)
-    
+    endpoint = endpoint_service.add_endpoint(endpoint_request: endpoint_request)
     logger.info("created new endpoint: #{endpoint.verb} #{endpoint.path}")
 
     { response: endpoint.attributes }.to_json
-  rescue StandardError => e
+  rescue ClientError => e
     status 400
+    log_error(e)
+    { respone: "could not handle request to add endpoint: #{e.message}" }.to_json
+  rescue StandardError => e
+    status 500
+    log_error(e)
     { respone: "could not handle request to add endpoint: #{e.message}" }.to_json
   end
 
   post '/endpoints' do
-    content_type :json
+    endpoint_requests = validate_request {
+      raw_requests = JSON.parse(request.body.read)
+      raw_requests.map do |raw_request|
+        Models::EndpointRequest.new(raw_request)
+      end
+    }
 
-    raw_endpoints = JSON.parse(request.body.read)
-    
-    endpoints = raw_endpoints.map do |raw_endpoint|
-      next_id = storage_client.incr(key: CURRENT_ID_KEY)
-      endpoint = Models::Endpoint.build(raw_endpoint, id: next_id)
-
-      storage_client.set(key: Services::EndpointIdComposer.call(id: endpoint.id), value: endpoint.attributes.to_json)
-      
-      add_endpoint(endpoint: endpoint, storage_client: storage_client)
-      
-      logger.info("created new endpoint: #{endpoint.verb} #{endpoint.path}")
-
-      endpoint
+    endpoints = endpoint_requests.map do |endpoint_request|
+      endpoint_service.add_endpoint(endpoint_request: endpoint_request)
     end
 
+    logger.info("created #{endpoints.count} new endpoints [#{endpoints.map(&:name).join(', ')}]")
+
     { response: endpoints.map(&:attributes) }.to_json
-  rescue StandardError => e
+  rescue ClientError => e
     status 400
+    log_error(e)
+    { respone: "could not handle request to add endpoints: #{e.message}" }.to_json
+  rescue StandardError => e
+    status 500
+    log_error(e)
     { respone: "could not handle request to add endpoints: #{e.message}" }.to_json
   end
 
-  put '/endpoint' do
-    content_type :json
+  put '/endpoint/:id' do
+    endpoint_request = validate_request { Models::EndpointRequest.new(JSON.parse(request.body.read)) }
 
-    endpoint = Models::Endpoint.build(JSON.parse(request.body.read))
-
-    storage_client.delete(key: Services::EndpointIdComposer.call(id: endpoint.id))
-    remove_endpoint(endpoint: endpoint)
-
-    storage_client.set(key: Services::EndpointIdComposer.call(id: endpoint.id), value: endpoint.attributes.to_json)
-    add_endpoint(endpoint: endpoint, storage_client: storage_client)
+    endpoint_id = validate_endpoint_id(params)
+    endpoint = endpoint_service.update_endpoint(endpoint_id: endpoint_id, endpoint_request: endpoint_request)
 
     logger.info("updated endpoint: #{endpoint.verb} #{endpoint.path}")
 
     { response: endpoint.attributes }.to_json
-  rescue StandardError => e
+  rescue ClientError => e
     status 400
+    log_error(e)
+    { respone: "could not handle request to update endpoint: #{e.message}" }.to_json
+  rescue StandardError => e
+    status 500
+    log_error(e)
     { respone: "could not handle request to update endpoint: #{e.message}" }.to_json
   end
 
-  delete '/endpoint' do
-    content_type :json
-
-    endpoint_id = Services::EndpointIdComposer.call(id: params['id'])
-
-    persisted_endpoint = storage_client.get(key: endpoint_id)
-    raise "endpoint ##{endpoint_id} not found" if persisted_endpoint.nil?
-    
-    endpoint = Models::Endpoint.new(JSON.parse(persisted_endpoint))
-
-    logger.info("found endpoint to remove: #{endpoint}")
-
-    storage_client.delete(key: endpoint_id)
-
-    remove_endpoint(endpoint: endpoint)
+  delete '/endpoint/:id' do
+    endpoint_id = validate_endpoint_id(params)
+    endpoint = endpoint_service.remove_endpoint(endpoint_id: endpoint_id)
 
     logger.info("removed endpoint: #{endpoint.verb} #{endpoint.path}")
 
     { response: endpoint.attributes }.to_json
-  rescue StandardError => e
+  rescue ClientError => e
     status 400
+    log_error(e)
+    { respone: "could not handle request to remove endpoint: #{e.message}" }.to_json
+  rescue StandardError => e
+    status 500
+    log_error(e)
     { respone: "could not handle request to remove endpoint: #{e.message}" }.to_json
   end
 
   delete '/endpoints' do
-    content_type :json
-    all_endpoints = get_all_endpoints(storage_client: storage_client)
-    all_endpoints.map do |endpoint|
-      endpoint_id = Services::EndpointIdComposer.call(id: endpoint.id)
-      storage_client.delete(key: endpoint_id)
-      remove_endpoint(endpoint: endpoint)
-      logger.info("removed endpoint: #{endpoint.verb} #{endpoint.path}")
-    end
-    
-    logger.info("successfuly removed #{all_endpoints.count} endpoints")
+    removed_endpoints = endpoint_service.remove_all_endpoints
+
+    logger.info("successfuly removed #{removed_endpoints.count} endpoints")
 
     { response: "OK" }.to_json
   rescue StandardError => e
-    status 400
+    status 500
+    log_error(e)
     { respone: "could not handle request to remove endpoint: #{e.message}" }.to_json
-  end
-
-  private def get_all_endpoints(storage_client:)
-    storage_client
-      .get_all(prefix: Services::EndpointIdComposer::PREFIX)
-      .map { |raw_endpoint| Models::Endpoint.new(JSON.parse(raw_endpoint)) }
-  end
-
-  METHODS = {'GET' => :get, 'POST' => :post, 'PUT' => :put, 'PATCH' => :patch, 'DELETE' => :delete}
-  RESERVED_STATUS_CODES = [492, 592]
-  private def add_endpoint(endpoint:, storage_client:)
-    if RESERVED_STATUS_CODES.include?(endpoint.status_code)
-      raise "status code #{endpoint.status_code} is reserved for Mox and cannot be used for user-defined endpoints"
-    end
-    method = METHODS[endpoint.verb]
-    self.class.send(method, endpoint.path) do
-      content_type :json
-      body = JSON.parse(request.body.read) rescue nil
-      sleep(calculate_sleep_time(endpoint: endpoint))
-
-      status endpoint.status_code
-      endpoint.headers.each { |k, v| headers[k] = v }
-      body endpoint_return_value(endpoint: endpoint, params: params, body: body, storage_client: storage_client)
-    rescue SyntaxError => e
-      status 592
-      { respone: "MOX ERROR: endpoint response could not be returned due to bad syntax: #{e.message}" }.to_json
-    end
   end
 
   not_found do
@@ -186,30 +149,72 @@ class App < Sinatra::Base
     { respone: "MOX ERROR: endpoint doesn't exist" }.to_json
   end
 
-  private def endpoint_return_value(endpoint:, params:, body:, storage_client:)
-    endpoint_id = Services::EndpointIdComposer.call(id: endpoint.id)
+  METHODS = {'GET' => :get, 'POST' => :post, 'PUT' => :put, 'PATCH' => :patch, 'DELETE' => :delete}
+  RESERVED_STATUS_CODES = [491, 591, 492]
+
+  def self.register_endpoint(endpoint:, sleep_time:)
+    if RESERVED_STATUS_CODES.include?(endpoint.status_code)
+      raise "status code #{endpoint.status_code} is reserved for Mox and cannot be used for user-defined endpoints"
+    end
+    method = METHODS[endpoint.verb]
+    self.send(method, endpoint.path) do
+      content_type :json
+      body = JSON.parse(request.body.read) rescue nil
+      sleep(sleep_time)
+
+      status endpoint.status_code
+      endpoint.headers.each { |k, v| headers[k] = v }
+      body endpoint_return_value(endpoint_id: endpoint.id,
+                                 params: params,
+                                 body: body,
+                                 storage_client: Services::Storage::InternalStorageClient.instance)
+    rescue TemplateEvaluationError => e
+      status 491
+      log_error(e)
+      { respone: "MOX ERROR: endpoint response could not be returned template evaluation error: #{e.message}" }.to_json
+    rescue InvalidTemplateError => e
+      status 491
+      log_error(e)
+      { respone: "MOX ERROR: endpoint response could not be returned due to bad syntax: #{e.message}" }.to_json
+    rescue => e
+      status 591
+      log_error(e)
+      { respone: "MOX ERROR: endpoint response could not be returned unexpectedly. #{e.message}" }.to_json
+    end
+  end
+
+  # since the storage is the single source of truth, we fetch the current endpoint from it upon each serve
+  private def endpoint_return_value(endpoint_id:, params:, body:, storage_client:)
+    endpoint_id = Services::EndpointIdComposer.call(id: endpoint_id)
     persisted_endpoint = Models::Endpoint.new(JSON.parse(storage_client.get(key: endpoint_id)))
     persisted_endpoint.return_value_json(binding)
   end
 
-  private def calculate_sleep_time(endpoint:)
-    if endpoint.min_response_millis.nil? && endpoint.max_response_millis.nil?
-      0
-    elsif endpoint.max_response_millis.nil?
-      endpoint.min_response_millis.to_f / 1000
-    elsif endpoint.min_response_millis.nil?
-      endpoint.max_response_millis.to_f / 1000
-    elsif endpoint.min_response_millis > endpoint.max_response_millis
-      logger.warn("response time range is invalid for endpoint: #{endpoint.attributes}")
-      0
-    else
-      rand((endpoint.min_response_millis.to_f / 1000)..(endpoint.max_response_millis.to_f / 1000))
+  def self.deregister_endpoint(endpoint:)
+    self.routes[endpoint.verb.upcase].delete_if do |m|
+      m[0].safe_string == Mustermann.new(endpoint.path).safe_string
     end
   end
 
-  private def remove_endpoint(endpoint:)
-    self.class.routes[endpoint.verb.upcase].delete_if do |m|
-      m[0].safe_string == Mustermann.new(endpoint.path).safe_string
+
+  private def validate_endpoint_id(params)
+    validate_request {
+      parsed_id = Integer(params['id'])
+      raise EndpointIdNotFound unless parsed_id
+      parsed_id
+    }
+  end
+
+  private def validate_request(&block)
+    begin
+      block.call
+    rescue StandardError => e
+      raise InvalidRequest.new(e.message)
     end
+  end
+
+  private def log_error(e)
+    logger.error e.message
+    logger.error e.backtrace.join("\n")
   end
 end
