@@ -1,4 +1,4 @@
-FROM ruby:2.6.3
+FROM ruby:2.7.3
 
 RUN apt-get update -qq && apt-get install -y build-essential
 
@@ -8,6 +8,7 @@ WORKDIR $APP_HOME
 
 ADD Gemfile* $APP_HOME/
 RUN bundle install --without development test
+RUN bundle update --bundler
 
 ADD . $APP_HOME
 

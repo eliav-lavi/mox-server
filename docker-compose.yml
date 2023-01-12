@@ -1,7 +1,10 @@
 version: "2.4"
 services:
   server:
-    image: mox-server
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # image: eliavlavi/mox-server:0.5.1
     ports:
       - "9898:9898"
     networks:
