@@ -12,4 +12,5 @@ RUN bundle update --bundler
 
 ADD . $APP_HOME
 
-CMD ["bundle", "exec", "rackup", "--host", "0.0.0.0", "-p", "9898"]
+ENV PORT=9898
+ENTRYPOINT bundle exec rackup --host 0.0.0.0 -p $PORT
