@@ -12,7 +12,7 @@ Needless to say, **mox is not intended to be used in production** or any world-f
 
 ## Setup
 If you're using Docker, the simplest way to get started is with `docker-compose up -d`. This will bring up the server itself at port `9898`.
-To use a different port, set the PORT environment variable, e.g. `PORT=80`. Note that you also have to expose the new port in the docker-compose.yml file: 
+To use a different port, set the PORT environment variable, e.g. `PORT=80`. Note that you have to expose the new port in the docker-compose.yml file: 
 ```
   mox:
     image: eliavlavi/mox-server:<version>
