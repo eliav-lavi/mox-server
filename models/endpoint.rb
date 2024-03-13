@@ -1,6 +1,7 @@
 require 'dry-struct'
 require 'json'
 require 'erb'
+require 'base64'
 
 require_relative '../types'
 require_relative 'endpoint_request'
@@ -14,6 +15,7 @@ module Models
     attribute :verb, Types::String
     attribute :path, Types::String
     attribute :return_value, Types::Any
+    attribute :return_value_binary, Types::Bool.default(false)
     attribute :min_response_millis?, Types::Integer
     attribute :max_response_millis?, Types::Integer
     attribute :status_code, Types::Integer.default(200)
@@ -29,8 +31,18 @@ module Models
       raise TemplateEvaluationError.new(e.message)
     end
 
+    def return_value_binary
+      Base64.decode64(return_value)
+    rescue StandardError => e
+      raise InvalidBinaryError.new(e.message)
+    end
+
     def name
       "#{verb} #{path}"
+    end
+
+    def return_value_binary?
+      self[:return_value_binary]
     end
 
     def self.build(obj, id: nil)
