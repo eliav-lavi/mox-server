@@ -187,7 +187,11 @@ class App < Sinatra::Base
   private def endpoint_return_value(endpoint_id:, params:, body:, storage_client:)
     endpoint_id = Services::EndpointIdComposer.call(id: endpoint_id)
     persisted_endpoint = Models::Endpoint.new(JSON.parse(storage_client.get(key: endpoint_id)))
-    persisted_endpoint.return_value_json(binding)
+    if persisted_endpoint.return_value_binary?
+      persisted_endpoint.return_value_binary
+    else
+      persisted_endpoint.return_value_json(binding)
+    end
   end
 
   def self.deregister_endpoint(endpoint:)

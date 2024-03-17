@@ -11,6 +11,7 @@ module Models
     attribute :verb, Types::String
     attribute :path, Types::String
     attribute :return_value, Types::Any
+    attribute :return_value_binary, Types::Bool.default(false)
     attribute :min_response_millis?, Types::Integer
     attribute :max_response_millis?, Types::Integer
     attribute :status_code, Types::Integer.default(200)
