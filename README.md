@@ -199,3 +199,25 @@ It is also possible to set a range for randomizing the delay time by supplying `
   "max_response_millis": 500
 }
 ```
+
+### Binary Response
+It is possible to return binary data as a response of an `endpoint` by setting the `return_value` to a base64 encoded string and by setting the `return_value_binary` to true. This is useful for returning binary files, such as images or PDFs. For example:
+```json
+{
+  "verb": "GET",
+  "path": "/my_binary_path",
+  "return_value_binary": true,
+  "return_value": "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAABaElEQVR42mL8//8/AyUYIIgBk"
+}
+```
+
+### Content Type
+Supply the optional `content_type` field to set a custom `Content-Type` for an `endpoint` (default is `application/json`):
+```json
+{
+  "verb": "GET",
+  "path": "/my_custom_content_type",
+  "content_type": "text/plain",
+  "return_value": "plaintext"
+}
+```

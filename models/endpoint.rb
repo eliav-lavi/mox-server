@@ -13,6 +13,7 @@ module Models
 
     attribute :id, Types::Integer
     attribute :verb, Types::String
+    attribute :content_type, Types::String.default('json')
     attribute :path, Types::String
     attribute :return_value, Types::Any
     attribute :return_value_binary, Types::Bool.default(false)
