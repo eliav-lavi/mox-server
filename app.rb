@@ -158,7 +158,7 @@ class App < Sinatra::Base
     end
     method = METHODS[endpoint.verb]
     self.send(method, endpoint.path) do
-      content_type endpoint.content_type.empty? || endpoint.content_type == 'json' ? :json : endpoint.content_type
+      content_type endpoint.content_type.empty? ? :json : endpoint.content_type
       body = JSON.parse(request.body.read) rescue nil
       sleep(sleep_time)
 
