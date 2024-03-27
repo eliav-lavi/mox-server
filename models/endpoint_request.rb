@@ -10,6 +10,7 @@ module Models
 
     attribute :verb, Types::String
     attribute :path, Types::String
+    attribute :content_type, Types::String.default('json')
     attribute :return_value, Types::Any
     attribute :return_value_binary, Types::Bool.default(false)
     attribute :min_response_millis?, Types::Integer
